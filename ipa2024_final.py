@@ -1,26 +1,49 @@
 #######################################################################################
-# Yourname:
-# Your student ID:
-# Your GitHub Repo: 
+# Yourname: Kittiphot Mongkolrat
+# Your student ID: 66070239
+# Your GitHub Repo: https://github.com/OhmKittiphot/IPA2024-Final.git
 
 #######################################################################################
 # 1. Import libraries for API requests, JSON formatting, time, os, (restconf_final or netconf_final), netmiko_final, and ansible_final.
 
-<!!!REPLACEME with code for libraries>
+import os
+import time
+import json
+import requests
+
+# เลือกใช้ RESTCONF (สำหรับ Part 1)
+import restconf_final as dev   # ต้องมีไฟล์ restconf_final.py ตามที่ทำไว้
+# Part2
+import netmiko_final as nm              # <- ฟังก์ชัน gigabit_status()
+import ansible_final as ans             # <- ฟังก์ชัน showrun()
+from requests_toolbelt import MultipartEncoder  # <- ส่งไฟล์แนบให้ Webex
+
+
+requests.packages.urllib3.disable_warnings()    # ปิด warning SSL
+
+# student id สำหรับจับ prefix คำสั่งจาก Webex
+STUDENT_ID = "66070239"
 
 #######################################################################################
 # 2. Assign the Webex access token to the variable ACCESS_TOKEN using environment variables.
 
-ACCESS_TOKEN = os.environ."<!!!REPLACEME with os.environ method and environment variable!!!>"
+ACCESS_TOKEN = os.environ.get("WEBEX_BOT_TOKEN", "")
+if not ACCESS_TOKEN:
+    raise RuntimeError("WEBEX_BOT_TOKEN is not set in environment variables")
+
+# เตรียม Bearer header
+AUTH_HEADER = f"Bearer {ACCESS_TOKEN}"
 
 #######################################################################################
 # 3. Prepare parameters get the latest message for messages API.
 
 # Defines a variable that will hold the roomId
-roomIdToGetMessages = (
-    "<!!!REPLACEME with roomID of the IPA2024 Webex Teams room!!!>"
+# เลือกใช้ ENV เพื่อไม่ hardcode roomId (ถ้าไม่ได้ตั้ง ENV ให้เติมค่า roomId ตรง fallback)
+roomIdToGetMessages = os.environ.get(
+    "WEBEX_ROOM_ID",
 )
 
+# วนลูปรอข้อความใหม่จากห้อง
 while True:
     # always add 1 second of delay to the loop to not go over a rate limit of API calls
     time.sleep(1)
@@ -31,19 +54,19 @@ while True:
     getParameters = {"roomId": roomIdToGetMessages, "max": 1}
 
     # the Webex Teams HTTP header, including the Authoriztion
-    getHTTPHeader = {"Authorization": <!!!REPLACEME!!!>}
+    getHTTPHeader = {"Authorization": AUTH_HEADER}
 
-# 4. Provide the URL to the Webex Teams messages API, and extract location from the received message.
-    
+    # 4. Provide the URL to the Webex Teams messages API, and extract location from the received message.
     # Send a GET request to the Webex Teams messages API.
     # - Use the GetParameters to get only the latest message.
     # - Store the message in the "r" variable.
     r = requests.get(
-        "<!!!REPLACEME with URL of Webex Teams Messages API!!!>",
-        params=<!!!REPLACEME with HTTP parameters!!!>,
-        headers=<!!!REPLACEME with HTTP headers!!!>,
+        "https://webexapis.com/v1/messages",   # URL ของ Webex Messages API
+        params=getParameters,                  # HTTP parameters
+        headers=getHTTPHeader,                 # HTTP headers
+        verify=False
     )
-    # verify if the retuned HTTP status code is 200/OK
+    # verify if the returned HTTP status code is 200/OK
     if not r.status_code == 200:
         raise Exception(
             "Incorrect reply from Webex Teams API. Status code: {}".format(r.status_code)
@@ -60,33 +83,43 @@ while True:
     messages = json_data["items"]
     
     # store the text of the first message in the array
-    message = messages[0]["text"]
+    message = messages[0].get("text", "")
     print("Received message: " + message)
 
     # check if the text of the message starts with the magic character "/" followed by your studentID and a space and followed by a command name
     #  e.g.  "/66070123 create"
-    if message.startswith("<!!!REPLACEME!!!>"):
+    if message.startswith(f"/{STUDENT_ID}"):
+        # extract the command (คำ 2 หลัง studentID)
+        parts = message.strip().split()
+        command = parts[1].lower() if len(parts) > 1 else ""
+        print("command:", command)
 
-        # extract the command
-        command = <!!!REPLACEME!!!>
-        print(command)
-
-# 5. Complete the logic for each command
+        # 5. Complete the logic for each command
+        responseMessage = "Error: No command or unknown command"  # default
 
         if command == "create":
-            <!!!REPLACEME with code for create command!!!>     
+            responseMessage = dev.create()
         elif command == "delete":
-            <!!!REPLACEME with code for delete command!!!>
+            responseMessage = dev.delete()
         elif command == "enable":
-            <!!!REPLACEME with code for enable command!!!>
+            responseMessage = dev.enable()
         elif command == "disable":
-            <!!!REPLACEME with code for disable command!!!>
+            responseMessage = dev.disable()
         elif command == "status":
-            <!!!REPLACEME with code for status command!!!>
-         elif command == "gigabit_status":
-            <!!!REPLACEME with code for gigabit_status command!!!>
+            responseMessage = dev.status()
+        elif command == "gigabit_status":
+            # Netmiko/TextFSM
+            responseMessage = nm.gigabit_status()
         elif command == "showrun":
-            <!!!REPLACEME with code for showrun command!!!>
+            # เรียก Ansible playbook
+            result = ans.showrun()  # ถ้าสำเร็จ ควร return path ไฟล์ เช่น outputs/showrun_10.0.15.61.txt
+            # ถ้า ans.showrun() ดีไซน์ให้คืน "ok" + เขียนไฟล์ คุณปรับตามฟังก์ชันของคุณได้
+            if isinstance(result, str) and result.endswith(".txt") and os.path.exists(result):
+                responseMessage = "ok"
+                showrun_file_path = result
+            else:
+                # กรณีผิดพลาด ให้ส่ง log ข้อความเต็มกลับห้อง
+                responseMessage = result if isinstance(result, str) else str(result)
         else:
             responseMessage = "Error: No command or unknown command"
         
@@ -105,34 +138,56 @@ while True:
         # https://developer.webex.com/docs/basics for more detail
 
         if command == "showrun" and responseMessage == 'ok':
-            filename = "<!!!REPLACEME with show run filename and path!!!>"
-            fileobject = <!!!REPLACEME with open file!!!>
-            filetype = "<!!!REPLACEME with Content-type of the file!!!>"
-            postData = {
-                "roomId": <!!!REPLACEME!!!>,
-                "text": "show running config",
-                "files": (<!!!REPLACEME!!!>, <!!!REPLACEME!!!>, <!!!REPLACEME!!!>),
-            }
-            postData = MultipartEncoder(<!!!REPLACEME!!!>)
+            filename = os.path.basename(showrun_file_path)        # เช่น showrun_10.0.15.61.txt
+            fileobject = open(showrun_file_path, "rb")            # เปิดไฟล์ที่ ansible สร้าง
+            filetype = "text/plain"                               # content-type ของไฟล์ .txt
+
+            # Multipart form
+            postData = MultipartEncoder(
+                fields={
+                    "roomId": roomIdToGetMessages,
+                    "text": "show running config",
+                    "files": (filename, fileobject, filetype),
+                }
+            )
             HTTPHeaders = {
-            "Authorization": ACCESS_TOKEN,
-            "Content-Type": <!!!REPLACEME with postData Content-Type!!!>,
+                "Authorization": AUTH_HEADER,
+                "Content-Type": postData.content_type,
             }
-        # other commands only send text, or no attached file.
+            # Post the call to the Webex Teams message API (multipart)
+            r = requests.post(
+                "https://webexapis.com/v1/messages",
+                data=postData,
+                headers=HTTPHeaders,
+                verify=False
+            )
+            # ปิดไฟล์หลังส่ง
+            try:
+                fileobject.close()
+            except:
+                pass
+
+            if not r.status_code == 200:
+                raise Exception(
+                    "Incorrect reply from Webex Teams API. Status code: {}".format(r.status_code)
+                )
+
         else:
-            postData = {"roomId": <!!!REPLACEME!!!>, "text": <!!!REPLACEME!!!>}
+            # other commands only send text, or no attached file.
+            postData = {"roomId": roomIdToGetMessages, "text": responseMessage}
             postData = json.dumps(postData)
 
             # the Webex Teams HTTP headers, including the Authoriztion and Content-Type
-            HTTPHeaders = {"Authorization": <!!!REPLACEME!!!>, "Content-Type": <!!!REPLACEME!!!>}   
+            HTTPHeaders = {"Authorization": AUTH_HEADER, "Content-Type": "application/json"}   
 
-        # Post the call to the Webex Teams message API.
-        r = requests.post(
-            "<!!!REPLACEME with URL of Webex Teams Messages API!!!>",
-            data=<!!!REPLACEME!!!>,
-            headers=<!!!REPLACEME!!!>,
-        )
-        if not r.status_code == 200:
-            raise Exception(
-                "Incorrect reply from Webex Teams API. Status code: {}".format(r.status_code)
+            # Post the call to the Webex Teams message API.
+            r = requests.post(
+                "https://webexapis.com/v1/messages",
+                data=postData,
+                headers=HTTPHeaders,
+                verify=False
             )
+            if not r.status_code == 200:
+                raise Exception(
+                    "Incorrect reply from Webex Teams API. Status code: {}".format(r.status_code)
+                )
